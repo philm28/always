@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Brain, CheckCircle, Clock, AlertCircle, Zap } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { trainPersonaFromUploadedContent } from '../lib/aiTraining';
+import toast from 'react-hot-toast';
 
 interface PersonaTrainingProps {
   personaId: string;
@@ -56,6 +58,7 @@ export function PersonaTraining({ personaId, onTrainingComplete }: PersonaTraini
 
   const [overallProgress, setOverallProgress] = useState(0);
   const [isTraining, setIsTraining] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     // Calculate overall progress
@@ -121,6 +124,7 @@ export function PersonaTraining({ personaId, onTrainingComplete }: PersonaTraini
 
   const startTraining = async () => {
     setIsTraining(true);
+    setError(null);
     await updatePersonaStatus('training', 0);
 
     // Reset all steps
@@ -128,9 +132,42 @@ export function PersonaTraining({ personaId, onTrainingComplete }: PersonaTraini
       prev.map(step => ({ ...step, status: 'pending', progress: 0 }))
     );
 
-    // Simulate training steps sequentially
-    for (const step of trainingSteps) {
-      await simulateTrainingStep(step.id, Math.random() * 3000 + 2000); // 2-5 seconds per step
+    try {
+      // Start real AI training
+      const profile = await trainPersonaFromUploadedContent(
+        personaId,
+        (stepId: string, progress: number) => {
+          setTrainingSteps(prev => 
+            prev.map(step => 
+              step.id === stepId 
+                ? { 
+                    ...step, 
+                    status: progress === 100 ? 'completed' : 'processing', 
+                    progress 
+                  }
+                : step
+            )
+          );
+        }
+      );
+
+      toast.success('AI persona training completed successfully!');
+      console.log('Training completed with profile:', profile);
+    } catch (error) {
+      console.error('Training failed:', error);
+      setError(error instanceof Error ? error.message : 'Training failed');
+      toast.error('Training failed. Please try again.');
+      
+      // Mark current step as error
+      setTrainingSteps(prev => 
+        prev.map(step => 
+          step.status === 'processing' 
+            ? { ...step, status: 'error' }
+            : step
+        )
+      );
+    } finally {
+      setIsTraining(false);
     }
   };
 
@@ -227,6 +264,30 @@ export function PersonaTraining({ personaId, onTrainingComplete }: PersonaTraini
           <div className="flex items-center justify-center text-green-600">
             <CheckCircle className="h-5 w-5 mr-2" />
             <span className="font-medium">Training completed successfully!</span>
+          </div>
+        )}
+        
+        {error && (
+          <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <div className="flex items-start">
+              <AlertCircle className="h-5 w-5 text-red-500 mt-0.5 mr-3 flex-shrink-0" />
+              <div>
+                <h4 className="font-medium text-red-800">Training Error</h4>
+                <p className="text-sm text-red-700 mt-1">{error}</p>
+                <button
+                  onClick={() => {
+                    setError(null);
+                    setTrainingSteps(prev => 
+                      prev.map(step => ({ ...step, status: 'pending', progress: 0 }))
+                    );
+                    setOverallProgress(0);
+                  }}
+                  className="mt-2 text-sm text-red-600 hover:text-red-700 font-medium"
+                >
+                  Try Again
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

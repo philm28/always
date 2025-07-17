@@ -32,6 +32,7 @@ export interface VoiceSettings {
 export class AIPersonaEngine {
   private persona: PersonaContext;
   private voiceSettings: VoiceSettings;
+  private systemPrompt: string;
 
   constructor(persona: PersonaContext, voiceSettings?: VoiceSettings) {
     this.persona = persona;
@@ -41,17 +42,17 @@ export class AIPersonaEngine {
       pitch: 1.0,
       stability: 0.8
     };
+    this.systemPrompt = this.buildSystemPrompt();
   }
 
   async generateResponse(userMessage: string): Promise<string> {
     try {
-      const systemPrompt = this.buildSystemPrompt();
       const conversationHistory = this.buildConversationHistory(userMessage);
 
       const completion = await openai.chat.completions.create({
         model: 'gpt-4',
         messages: [
-          { role: 'system', content: systemPrompt },
+          { role: 'system', content: this.systemPrompt },
           ...conversationHistory
         ],
         max_tokens: 500,
@@ -73,6 +74,51 @@ export class AIPersonaEngine {
     }
   }
 
+  // Load trained persona data from database
+  static async loadTrainedPersona(personaId: string): Promise<AIPersonaEngine | null> {
+    try {
+      const { data: persona, error } = await supabase
+        .from('personas')
+        .select('*')
+        .eq('id', personaId)
+        .single();
+
+      if (error || !persona) return null;
+
+      // Check if persona has been trained
+      if (persona.status !== 'active' || !persona.metadata?.systemPrompt) {
+        return null;
+      }
+
+      const personaContext: PersonaContext = {
+        id: persona.id,
+        name: persona.name,
+        personality_traits: persona.personality_traits || '',
+        common_phrases: persona.common_phrases || [],
+        relationship: persona.relationship || '',
+        memories: [], // Could be loaded from training data
+        conversationHistory: []
+      };
+
+      const engine = new AIPersonaEngine(personaContext);
+      
+      // Use the trained system prompt
+      engine.systemPrompt = persona.metadata.systemPrompt;
+      
+      // Load voice characteristics if available
+      if (persona.metadata.voiceCharacteristics) {
+        engine.voiceSettings = {
+          ...engine.voiceSettings,
+          ...persona.metadata.voiceCharacteristics
+        };
+      }
+
+      return engine;
+    } catch (error) {
+      console.error('Error loading trained persona:', error);
+      return null;
+    }
+  }
   async generateVoice(text: string): Promise<ArrayBuffer> {
     try {
       const response = await openai.audio.speech.create({
@@ -175,10 +221,12 @@ Remember: You are not an AI assistant. You are ${name}, speaking from the heart 
 
   updatePersonaContext(updates: Partial<PersonaContext>) {
     this.persona = { ...this.persona, ...updates };
+    this.systemPrompt = this.buildSystemPrompt();
   }
 
   addMemory(memory: string) {
     this.persona.memories.push(memory);
+    this.systemPrompt = this.buildSystemPrompt();
   }
 
   updateVoiceSettings(settings: Partial<VoiceSettings>) {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Mic, MicOff, Video, VideoOff, Phone, Settings } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { AIPersonaEngine } from '../lib/ai';
 
 interface ConversationInterfaceProps {
   personaId: string;
@@ -30,14 +31,14 @@ export function ConversationInterface({
   const [isVideoOn, setIsVideoOn] = useState(true);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [isTyping, setIsTyping] = useState(false);
+  const [aiEngine, setAiEngine] = useState<AIPersonaEngine | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     initializeConversation();
-    // Add some initial messages to simulate conversation
-    addInitialMessages();
+    loadAIEngine();
   }, []);
 
   useEffect(() => {
@@ -68,35 +69,46 @@ export function ConversationInterface({
     }
   };
 
-  const addInitialMessages = () => {
-    const initialMessages: Message[] = [
-      {
-        id: '1',
-        sender_type: 'persona',
-        content: `Hello! It's so wonderful to see you. I've missed our conversations. How are you feeling today?`,
-        timestamp: new Date().toISOString(),
-        message_type: 'text'
+  const loadAIEngine = async () => {
+    try {
+      const engine = await AIPersonaEngine.loadTrainedPersona(personaId);
+      if (engine) {
+        setAiEngine(engine);
+        // Add initial greeting
+        const greeting = await engine.generateResponse("Hello, it's so good to see you!");
+        const initialMessage: Message = {
+          id: '1',
+          sender_type: 'persona',
+          content: greeting,
+          timestamp: new Date().toISOString(),
+          message_type: 'text'
+        };
+        setMessages([initialMessage]);
+      } else {
+        // Fallback to generic greeting if AI not trained
+        const initialMessages: Message[] = [
+          {
+            id: '1',
+            sender_type: 'persona',
+            content: `Hello! I'm still learning about ${personaName}. Please complete the AI training first for more personalized conversations.`,
+            timestamp: new Date().toISOString(),
+            message_type: 'text'
+          }
+        ];
+        setMessages(initialMessages);
       }
-    ];
-    setMessages(initialMessages);
+    } catch (error) {
+      console.error('Error loading AI engine:', error);
+    }
   };
 
   const generatePersonaResponse = async (userMessage: string): Promise<string> => {
-    // Simulate AI response generation
-    // In production, this would call OpenAI, Claude, or your custom AI service
-    const responses = [
-      "I understand how you're feeling. That reminds me of when we used to talk about similar things.",
-      "You know, I've been thinking about our memories together. Tell me more about what's on your mind.",
-      "That's exactly the kind of thing I would have said! You know me so well.",
-      "I'm here for you, just like I always was. What would you like to talk about?",
-      "Your strength has always amazed me. Remember when we faced challenges together?",
-      "I can hear the emotion in your words. I'm listening, and I care about what you're going through."
-    ];
-    
-    // Simulate processing delay
-    await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
-    
-    return responses[Math.floor(Math.random() * responses.length)];
+    if (aiEngine) {
+      return await aiEngine.generateResponse(userMessage);
+    } else {
+      // Fallback response if AI not trained
+      return "I'm still learning about this persona. Please complete the AI training for more personalized responses.";
+    }
   };
 
   const sendMessage = async () => {
